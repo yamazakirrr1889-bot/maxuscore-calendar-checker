@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Maxuscore Calendar Checker</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="assets/checker-mark.svg" alt="" class="brand-mark">
+          <div>
+            <p class="eyebrow">Maxuscore</p>
+            <h1>Calendar Checker</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="loadDemoButton" type="button" title="サンプル読み込み" aria-label="サンプル読み込み">
+            <span aria-hidden="true">▣</span>
+          </button>
+          <button class="primary-button" id="runCheckButton" type="button">
+            <span aria-hidden="true">✓</span>
+            <span>照合</span>
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="summary-grid" aria-label="照合サマリー">
+          <article class="summary-item">
+            <span>マクサスコア</span>
+            <strong id="maxuscoreCount">0</strong>
+          </article>
+          <article class="summary-item">
+            <span>カレンダー</span>
+            <strong id="calendarCount">0</strong>
+          </article>
+          <article class="summary-item is-warning">
+            <span>要確認</span>
+            <strong id="issueCount">0</strong>
+          </article>
+          <article class="summary-item is-good">
+            <span>一致</span>
+            <strong id="matchedCount">0</strong>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <aside class="setup-panel" aria-label="照合設定">
+            <section class="panel-section">
+              <div class="section-head">
+                <h2>データ</h2>
+                <span id="dataStatus">未読み込み</span>
+              </div>
+
+              <label class="upload-box">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>マクサスコアCSV</strong>
+                <small>顧客名、日付、開始時刻、終了時刻、担当者</small>
+                <input id="maxuscoreFile" type="file" accept=".csv,text/csv">
+              </label>
+
+              <label class="upload-box">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>Googleカレンダー</strong>
+                <small>CSV または ICS</small>
+                <input id="calendarFile" type="file" accept=".csv,.ics,text/csv,text/calendar">
+              </label>
+
+              <label class="upload-box">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>メンバー対応表</strong>
+                <small>任意: 担当者名, カレンダー名/メール</small>
+                <input id="memberFile" type="file" accept=".csv,text/csv">
+              </label>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-head">
+                <h2>照合ルール</h2>
+              </div>
+              <label class="field">
+                <span>許容する時間差</span>
+                <input id="toleranceInput" type="number" min="0" max="120" value="10">
+              </label>
+              <label class="field">
+                <span>カレンダータイトルの顧客名判定</span>
+                <select id="titleMatchSelect">
+                  <option value="contains">含まれていれば一致</option>
+                  <option value="loose">空白・記号を無視</option>
+                  <option value="off">日時と担当者のみ</option>
+                </select>
+              </label>
+              <label class="check-field">
+                <input id="ignoreDoneInput" type="checkbox" checked>
+                <span>キャンセル/失注らしい予定を除外</span>
+              </label>
+            </section>
+          </aside>
+
+          <section class="result-area" aria-label="照合結果">
+            <div class="toolbar">
+              <div class="search-wrap">
+                <span aria-hidden="true">⌕</span>
+                <input id="searchInput" type="search" placeholder="顧客名・担当者で検索">
+              </div>
+              <div class="view-tabs" role="tablist" aria-label="結果フィルター">
+                <button class="tab-button is-active" type="button" data-filter="issues" role="tab" aria-selected="true">要確認</button>
+                <button class="tab-button" type="button" data-filter="all" role="tab" aria-selected="false">すべて</button>
+                <button class="tab-button" type="button" data-filter="matched" role="tab" aria-selected="false">一致</button>
+              </div>
+              <button class="secondary-button" id="exportButton" type="button">
+                <span aria-hidden="true">⇩</span>
+                <span>CSV出力</span>
+              </button>
+            </div>
+
+            <div class="status-lanes" aria-label="結果カテゴリ">
+              <article class="status-lane">
+                <span>未反映</span>
+                <strong id="missingCount">0</strong>
+              </article>
+              <article class="status-lane">
+                <span>日時ズレ</span>
+                <strong id="timeMismatchCount">0</strong>
+              </article>
+              <article class="status-lane">
+                <span>担当者違い</span>
+                <strong id="memberMismatchCount">0</strong>
+              </article>
+              <article class="status-lane">
+                <span>余分な予定</span>
+                <strong id="extraCount">0</strong>
+              </article>
+            </div>
+
+            <div id="resultList" class="result-list"></div>
+            <div id="emptyState" class="empty-state">
+              <h2>照合データを読み込んでください</h2>
+              <p>CSV/ICSをアップロードするか、サンプルで動作を確認できます。</p>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <template id="resultTemplate">
+      <article class="result-item">
+        <div class="result-status"></div>
+        <div class="result-main">
+          <div class="result-head">
+            <h3></h3>
+            <span class="result-type"></span>
+          </div>
+          <div class="result-detail"></div>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
