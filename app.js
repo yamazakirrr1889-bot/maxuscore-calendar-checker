@@ -69,12 +69,18 @@ elements.maxuscoreFile.addEventListener("change", async (event) => {
 });
 
 elements.calendarFile.addEventListener("change", async (event) => {
-  const [file] = event.target.files;
-  if (!file) return;
-  const content = await file.text();
-  state.calendar = file.name.toLowerCase().endsWith(".ics")
-    ? parseIcs(content)
-    : normalizeCalendarRows(parseCsv(content));
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  const calendarEvents = [];
+  for (const file of files) {
+    const content = await file.text();
+    const sourceName = getSourceName(file.name);
+    const events = file.name.toLowerCase().endsWith(".ics")
+      ? parseIcs(content, sourceName)
+      : normalizeCalendarRows(parseCsv(content), sourceName);
+    calendarEvents.push(...events);
+  }
+  state.calendar = calendarEvents;
   setLoaded(event.target);
   updateDataStatus();
   runCheck();
@@ -304,14 +310,14 @@ function normalizeMaxuscoreRows(rows) {
     .filter(Boolean);
 }
 
-function normalizeCalendarRows(rows) {
+function normalizeCalendarRows(rows, sourceName = "") {
   return rows
     .map((row, index) => {
       const title = pick(row, "title") || pick(row, "customer");
       const date = pick(row, "date");
       const start = pick(row, "start");
       const end = pick(row, "end");
-      const member = pick(row, "member") || pick(row, "calendar") || "";
+      const member = pick(row, "member") || pick(row, "calendar") || sourceName;
       const startDate = parseDateTime(date, start);
       const endDate = parseDateTime(date, end) || addMinutes(startDate, 60);
       if (!title || !startDate) return null;
@@ -381,20 +387,22 @@ function parseCsv(text) {
   });
 }
 
-function parseIcs(text) {
+function parseIcs(text, sourceName = "") {
   const events = [];
+  const headerLines = unfoldIcs(text.split("BEGIN:VEVENT")[0] || "");
+  const calendarName = getIcsValue(headerLines, "X-WR-CALNAME") || getIcsValue(headerLines, "NAME") || sourceName;
   const blocks = text.split("BEGIN:VEVENT").slice(1);
   blocks.forEach((block, index) => {
     const lines = unfoldIcs(block.split("END:VEVENT")[0]);
     const summary = getIcsValue(lines, "SUMMARY");
     const start = parseIcsDate(getIcsValue(lines, "DTSTART"));
     const end = parseIcsDate(getIcsValue(lines, "DTEND")) || addMinutes(start, 60);
-    const organizer = getIcsValue(lines, "ORGANIZER") || getIcsValue(lines, "X-WR-CALNAME");
+    const organizer = getIcsValue(lines, "ORGANIZER");
     if (!summary || !start) return;
     events.push({
       id: `ics-${index}`,
       title: summary,
-      member: organizer.replace(/^mailto:/i, ""),
+      member: calendarName || organizer.replace(/^mailto:/i, ""),
       start,
       end,
     });
@@ -410,6 +418,10 @@ function getIcsValue(lines, key) {
   const line = lines.find((item) => item.startsWith(`${key}:`) || item.startsWith(`${key};`));
   if (!line) return "";
   return line.slice(line.indexOf(":") + 1).replaceAll("\\,", ",").replaceAll("\\n", " ").trim();
+}
+
+function getSourceName(fileName) {
+  return fileName.replace(/\.(csv|ics)$/i, "").trim();
 }
 
 function parseIcsDate(value) {
