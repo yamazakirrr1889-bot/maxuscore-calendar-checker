@@ -23,13 +23,13 @@ const issueClasses = {
 
 const headerAliases = {
   customer: ["顧客名", "お客様名", "氏名", "名前", "customer", "name", "client"],
-  appointmentAt: ["査定予約日時", "査定予定日時", "予約日時", "アポイント日時", "アポ日時", "訪問日時", "出張日時", "作業日時", "予定日時", "開始日時", "execution date"],
-  appointmentStart: ["査定予約時刻", "査定予定時刻", "予約時刻", "アポイント時刻", "アポ時刻", "訪問時刻", "出張時刻", "作業時刻", "予定時刻"],
-  appointmentEndAt: ["査定終了日時", "予約終了日時", "アポイント終了日時", "アポ終了日時", "訪問終了日時", "出張終了日時", "作業終了日時", "終了予定日時"],
+  appointmentAt: ["査定予約日時", "査定予定日時", "査定予約日", "査定予定日", "予約日時", "予約日", "アポイント日時", "アポ日時", "アポイント日", "アポ日", "訪問日時", "訪問日", "出張日時", "出張日", "作業日時", "作業日", "予定日時", "予定日", "開始日時", "execution date"],
+  appointmentStart: ["査定予約時刻", "査定予定時刻", "査定予約時間", "査定予定時間", "予約時刻", "予約時間", "アポイント時刻", "アポ時刻", "アポイント時間", "アポ時間", "訪問時刻", "訪問時間", "出張時刻", "出張時間", "作業時刻", "作業時間", "予定時刻", "予定時間"],
+  appointmentEndAt: ["査定終了日時", "予約終了日時", "アポイント終了日時", "アポ終了日時", "訪問終了日時", "出張終了日時", "作業終了日時", "終了予定日時", "終了日時"],
   date: ["日付", "予約日", "アポ日", "開始日", "date", "start date"],
   start: ["開始時刻", "開始時間", "開始", "start", "start time"],
   end: ["終了時刻", "終了時間", "終了", "end", "end time"],
-  member: ["担当者", "スタッフ", "メンバー", "営業担当", "member", "staff", "owner"],
+  member: ["査定担当者", "予約担当者", "案件担当者", "受付担当者", "訪問担当者", "出張担当者", "作業担当者", "契約担当者", "営業担当者", "営業担当", "担当者", "スタッフ", "メンバー", "member", "staff", "owner"],
   status: ["ステータス", "状態", "status"],
   title: ["タイトル", "件名", "予定", "summary", "subject", "title"],
 };
@@ -280,7 +280,7 @@ function normalizeMaxuscoreRows(rows) {
   return rows
     .map((row, index) => {
       const customer = pick(row, "customer") || pick(row, "title");
-      const member = pick(row, "member");
+      const member = pick(row, "member") || pickByHeaderIncludes(row, "member");
       const status = pick(row, "status");
       const startDate = parseMaxuscoreStartDate(row);
       const endDate = parseMaxuscoreEndDate(row, startDate);
@@ -302,7 +302,7 @@ function parseMaxuscoreStartDate(row) {
   const labeledDate = extractLabeledDateTime(appointmentAt, headerAliases.appointmentAt);
   if (labeledDate) return labeledDate;
 
-  const appointmentStart = pick(row, "appointmentStart") || pickByHeaderIncludes(row, "appointmentStart");
+  const appointmentStart = pick(row, "appointmentStart") || pickByHeaderIncludes(row, "appointmentStart") || pick(row, "start");
   const appointmentDate = parseLastDateTime(appointmentAt) || parseDateTime(appointmentAt, appointmentStart);
   if (appointmentDate) return appointmentDate;
 
@@ -312,7 +312,7 @@ function parseMaxuscoreStartDate(row) {
 function parseMaxuscoreEndDate(row, startDate) {
   const appointmentEndAt = pick(row, "appointmentEndAt") || pickByHeaderIncludes(row, "appointmentEndAt");
   const labeledDate = extractLabeledDateTime(appointmentEndAt, headerAliases.appointmentEndAt);
-  return labeledDate || parseDateTime(appointmentEndAt, "") || parseDateTime(pick(row, "date"), pick(row, "end")) || addMinutes(startDate, 60);
+  return labeledDate || parseLastDateTime(appointmentEndAt) || parseDateTime(appointmentEndAt, pick(row, "end")) || parseDateTime(pick(row, "date"), pick(row, "end")) || addMinutes(startDate, 60);
 }
 
 function normalizeCalendarRows(rows, sourceName = "") {
@@ -469,30 +469,35 @@ function extractLabeledDateTime(value, labels) {
 }
 
 function parseFirstDateTime(value) {
-  const match = String(value || "").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}:\d{2}/);
+  const match = String(value || "").normalize("NFKC").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}(?::\d{2}|時(?:\d{1,2}分?)?)/);
   return match ? parseDateTime(match[0], "") : null;
 }
 
 function parseLastDateTime(value) {
-  const matches = String(value || "").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}:\d{2}/g);
+  const matches = String(value || "").normalize("NFKC").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}(?::\d{2}|時(?:\d{1,2}分?)?)/g);
   return matches?.length ? parseDateTime(matches[matches.length - 1], "") : null;
 }
 
 function parseDateTime(dateValue, timeValue) {
   if (!dateValue && !timeValue) return null;
   const combined = timeValue ? `${dateValue} ${timeValue}` : dateValue;
-  const normalized = combined
+  const normalized = String(combined)
+    .normalize("NFKC")
     .replaceAll("/", "-")
     .replace(/[年月]/g, "-")
     .replace("日", "")
+    .replace(/[（(][^）)]*[）)]/g, " ")
+    .replace("時", ":")
+    .replace("分", "")
     .trim();
-  const direct = new Date(normalized);
-  if (!Number.isNaN(direct.getTime())) return direct;
+  const match = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:.*?(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    const [, year, month, day, hour = "00", minute = "00"] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  }
 
-  const match = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2}).*?(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute] = match;
-  return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  const direct = new Date(normalized);
+  return Number.isNaN(direct.getTime()) ? null : direct;
 }
 
 function resolveMember(member) {
