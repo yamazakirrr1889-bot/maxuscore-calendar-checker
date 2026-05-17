@@ -12,7 +12,6 @@ const issueLabels = {
   missing: "未反映",
   time: "日時ズレ",
   member: "担当者違い",
-  extra: "余分な予定",
 };
 
 const issueClasses = {
@@ -20,7 +19,6 @@ const issueClasses = {
   missing: "status-missing",
   time: "status-time",
   member: "status-member",
-  extra: "status-extra",
 };
 
 const headerAliases = {
@@ -55,7 +53,6 @@ const elements = {
   missingCount: document.querySelector("#missingCount"),
   timeMismatchCount: document.querySelector("#timeMismatchCount"),
   memberMismatchCount: document.querySelector("#memberMismatchCount"),
-  extraCount: document.querySelector("#extraCount"),
 };
 
 elements.maxuscoreFile.addEventListener("change", async (event) => {
@@ -147,7 +144,6 @@ function runCheck() {
   const filteredCalendar = elements.ignoreDoneInput.checked
     ? state.calendar.filter((event) => !looksCanceled(event.title))
     : state.calendar;
-  const usedCalendarIds = new Set();
   const results = [];
 
   state.maxuscore.forEach((appointment) => {
@@ -166,29 +162,21 @@ function runCheck() {
     }
 
     if (best.score.timeMismatch) {
-      usedCalendarIds.add(best.event.id);
       results.push(createResult("time", appointment, best.event, "日時が許容範囲を超えてずれています。"));
       return;
     }
 
     if (best.score.memberMismatch) {
-      usedCalendarIds.add(best.event.id);
       results.push(createResult("member", appointment, best.event, "担当者とカレンダー所有者の対応が違う可能性があります。"));
       return;
     }
 
     if (best.score.matched) {
-      usedCalendarIds.add(best.event.id);
       results.push(createResult("matched", appointment, best.event, "マクサスコアとカレンダーが一致しています。"));
       return;
     }
 
     results.push(createResult("missing", appointment, null, "同じ担当者の予定はありますが、日時または顧客名が一致しません。"));
-  });
-
-  filteredCalendar.forEach((event) => {
-    if (usedCalendarIds.has(event.id)) return;
-    results.push(createResult("extra", null, event, "マクサスコア側に対応するアポイントが見つかりません。"));
   });
 
   state.results = results.sort(sortResults);
@@ -249,7 +237,6 @@ function renderSummary() {
   elements.missingCount.textContent = String(state.results.filter((result) => result.type === "missing").length);
   elements.timeMismatchCount.textContent = String(state.results.filter((result) => result.type === "time").length);
   elements.memberMismatchCount.textContent = String(state.results.filter((result) => result.type === "member").length);
-  elements.extraCount.textContent = String(state.results.filter((result) => result.type === "extra").length);
 }
 
 function renderResults() {
@@ -471,7 +458,7 @@ function looksCanceled(value) {
 }
 
 function sortResults(a, b) {
-  const order = { missing: 0, time: 1, member: 2, extra: 3, matched: 4 };
+  const order = { missing: 0, time: 1, member: 2, matched: 3 };
   const aTime = (a.maxuscore || a.calendar)?.start?.getTime() || 0;
   const bTime = (b.maxuscore || b.calendar)?.start?.getTime() || 0;
   return order[a.type] - order[b.type] || aTime - bTime;
