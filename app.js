@@ -23,6 +23,9 @@ const issueClasses = {
 
 const headerAliases = {
   customer: ["顧客名", "お客様名", "氏名", "名前", "customer", "name", "client"],
+  appointmentAt: ["査定予約日時", "査定予定日時", "予約日時", "アポイント日時", "アポ日時", "訪問日時", "出張日時", "作業日時", "予定日時", "開始日時", "execution date"],
+  appointmentStart: ["査定予約時刻", "査定予定時刻", "予約時刻", "アポイント時刻", "アポ時刻", "訪問時刻", "出張時刻", "作業時刻", "予定時刻"],
+  appointmentEndAt: ["査定終了日時", "予約終了日時", "アポイント終了日時", "アポ終了日時", "訪問終了日時", "出張終了日時", "作業終了日時", "終了予定日時"],
   date: ["日付", "予約日", "アポ日", "開始日", "date", "start date"],
   start: ["開始時刻", "開始時間", "開始", "start", "start time"],
   end: ["終了時刻", "終了時間", "終了", "end", "end time"],
@@ -277,13 +280,10 @@ function normalizeMaxuscoreRows(rows) {
   return rows
     .map((row, index) => {
       const customer = pick(row, "customer") || pick(row, "title");
-      const date = pick(row, "date");
-      const start = pick(row, "start");
-      const end = pick(row, "end");
       const member = pick(row, "member");
       const status = pick(row, "status");
-      const startDate = parseDateTime(date, start);
-      const endDate = parseDateTime(date, end) || addMinutes(startDate, 60);
+      const startDate = parseMaxuscoreStartDate(row);
+      const endDate = parseMaxuscoreEndDate(row, startDate);
       if (!customer || !startDate || looksCanceled(status)) return null;
       return {
         id: `maxuscore-${index}`,
@@ -295,6 +295,24 @@ function normalizeMaxuscoreRows(rows) {
       };
     })
     .filter(Boolean);
+}
+
+function parseMaxuscoreStartDate(row) {
+  const appointmentAt = pick(row, "appointmentAt") || pickByHeaderIncludes(row, "appointmentAt");
+  const labeledDate = extractLabeledDateTime(appointmentAt, headerAliases.appointmentAt);
+  if (labeledDate) return labeledDate;
+
+  const appointmentStart = pick(row, "appointmentStart") || pickByHeaderIncludes(row, "appointmentStart");
+  const appointmentDate = parseLastDateTime(appointmentAt) || parseDateTime(appointmentAt, appointmentStart);
+  if (appointmentDate) return appointmentDate;
+
+  return parseDateTime(pick(row, "date"), pick(row, "start"));
+}
+
+function parseMaxuscoreEndDate(row, startDate) {
+  const appointmentEndAt = pick(row, "appointmentEndAt") || pickByHeaderIncludes(row, "appointmentEndAt");
+  const labeledDate = extractLabeledDateTime(appointmentEndAt, headerAliases.appointmentEndAt);
+  return labeledDate || parseDateTime(appointmentEndAt, "") || parseDateTime(pick(row, "date"), pick(row, "end")) || addMinutes(startDate, 60);
 }
 
 function normalizeCalendarRows(rows, sourceName = "") {
@@ -426,6 +444,38 @@ function pick(row, key) {
     aliases.some((alias) => normalizeText(header) === normalizeText(alias))
   );
   return foundKey ? row[foundKey].trim() : "";
+}
+
+function pickByHeaderIncludes(row, key) {
+  const aliases = headerAliases[key] || [key];
+  const foundKey = Object.keys(row).find((header) =>
+    aliases.some((alias) => normalizeText(header).includes(normalizeText(alias)))
+  );
+  return foundKey ? row[foundKey].trim() : "";
+}
+
+function extractLabeledDateTime(value, labels) {
+  const text = String(value || "").replace(/\s+/g, " ");
+  if (!text) return null;
+
+  for (const label of labels) {
+    const index = text.indexOf(label);
+    if (index === -1) continue;
+    const date = parseFirstDateTime(text.slice(index + label.length));
+    if (date) return date;
+  }
+
+  return null;
+}
+
+function parseFirstDateTime(value) {
+  const match = String(value || "").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}:\d{2}/);
+  return match ? parseDateTime(match[0], "") : null;
+}
+
+function parseLastDateTime(value) {
+  const matches = String(value || "").match(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s*[（(][^）)]*[）)])?\s*\d{1,2}:\d{2}/g);
+  return matches?.length ? parseDateTime(matches[matches.length - 1], "") : null;
 }
 
 function parseDateTime(dateValue, timeValue) {
