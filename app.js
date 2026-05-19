@@ -22,7 +22,7 @@ const issueClasses = {
 };
 
 const headerAliases = {
-  customer: ["顧客名", "お客様名", "氏名", "名前", "customer", "name", "client"],
+  customer: ["顧客氏名", "顧客名", "顧客", "お客様名", "お客様", "契約者", "契約者名", "氏名", "名前", "customer", "name", "client"],
   appointmentAt: ["査定予約日時", "査定予定日時", "査定予約日", "査定予定日", "予約日時", "予約日", "アポイント日時", "アポ日時", "アポイント日", "アポ日", "訪問日時", "訪問日", "出張日時", "出張日", "作業日時", "作業日", "予定日時", "予定日", "開始日時", "execution date"],
   appointmentStart: ["査定予約時刻", "査定予定時刻", "査定予約時間", "査定予定時間", "予約時刻", "予約時間", "アポイント時刻", "アポ時刻", "アポイント時間", "アポ時間", "訪問時刻", "訪問時間", "出張時刻", "出張時間", "作業時刻", "作業時間", "予定時刻", "予定時間"],
   appointmentEndAt: ["査定終了日時", "予約終了日時", "アポイント終了日時", "アポ終了日時", "訪問終了日時", "出張終了日時", "作業終了日時", "終了予定日時", "終了日時"],
@@ -150,15 +150,15 @@ function runCheck() {
   const results = [];
 
   state.maxuscore.forEach((appointment) => {
-    const candidates = filteredCalendar
+    const allCandidates = filteredCalendar
       .map((event) => ({
         event,
         score: scoreCandidate(appointment, event, toleranceMinutes),
       }))
-      .filter((candidate) => candidate.score.relevant)
       .sort((a, b) => b.score.total - a.score.total);
+    const candidates = allCandidates.filter((candidate) => candidate.score.relevant);
 
-    const best = candidates[0];
+    const best = candidates[0] || allCandidates.find((candidate) => candidate.score.total > 0);
     if (!best) {
       results.push(createResult("missing", appointment, null, "対応するカレンダー予定が見つかりません。"));
       return;
@@ -179,7 +179,7 @@ function runCheck() {
       return;
     }
 
-    results.push(createResult("missing", appointment, null, "同じ担当者の予定はありますが、日時または顧客名が一致しません。"));
+    results.push(createResult("missing", appointment, best.event, "近い予定はありますが、日時・担当者・顧客名の一致条件を満たしていません。"));
   });
 
   state.results = results.sort(sortResults);
@@ -195,8 +195,8 @@ function scoreCandidate(appointment, event, toleranceMinutes) {
   const titleMatch = isTitleMatch(appointment.customer, event.title);
   const titleMatchRequired = elements.titleMatchSelect.value !== "off";
   const relevant = timeClose || sameDay || memberMatch || titleMatch;
-  const matched = timeClose && (titleMatch || !titleMatchRequired) && (memberMatch || !appointment.member);
-  const total = (timeClose ? 50 : sameDay ? 18 : 0) + (memberMatch ? 30 : 0) + (titleMatch ? 30 : 0);
+  const matched = timeClose && (memberMatch || titleMatch || !titleMatchRequired);
+  const total = (timeClose ? 50 : sameDay ? 18 : 0) + (memberMatch ? 35 : 0) + (titleMatch ? 35 : 0);
 
   return {
     total,
@@ -206,7 +206,7 @@ function scoreCandidate(appointment, event, toleranceMinutes) {
     titleMatch,
     memberMatch,
     timeMismatch: sameDay && !timeClose && (memberMatch || titleMatch),
-    memberMismatch: timeClose && titleMatchRequired && titleMatch && !memberMatch,
+    memberMismatch: timeClose && titleMatchRequired && titleMatch && appointment.member && !memberMatch,
   };
 }
 
@@ -217,6 +217,7 @@ function isTitleMatch(customer, title) {
   const titleKey = normalizeNameForMatch(title);
   if (!customerKey || !titleKey) return false;
   if (titleKey.includes(customerKey) || customerKey.includes(titleKey)) return true;
+  if (getNameTokens(customerKey).some((token) => titleKey.includes(token))) return true;
   return similarity(customerKey, titleKey) >= 0.72;
 }
 
@@ -323,7 +324,7 @@ function normalizeCalendarRows(rows, sourceName = "") {
       const date = pick(row, "date");
       const start = pick(row, "start");
       const end = pick(row, "end");
-      const member = pick(row, "member") || pick(row, "calendar") || sourceName;
+      const member = normalizeMemberName(pick(row, "member") || pick(row, "calendar") || sourceName);
       const startDate = parseDateTime(date, start);
       const endDate = parseDateTime(date, end) || addMinutes(startDate, 60);
       if (!title || !startDate) return null;
@@ -613,9 +614,23 @@ function normalizeText(value) {
 function normalizeNameForMatch(value) {
   return normalizeText(
     String(value || "")
+      .replace(/[【\[][^】\]]*[】\]]/g, "")
+      .replace(/[（(][^）)]*[）)]/g, "")
       .replace(/様|さま|さん|殿|氏/g, "")
       .replace(/株式会社|有限会社|合同会社|買取|査定|予約|訪問|出張|案件|予定|カレンダー/g, "")
   );
+}
+
+function getNameTokens(value) {
+  const text = normalizeText(value);
+  if (!text) return [];
+  const tokens = new Set([text]);
+  for (let size = Math.min(4, text.length); size >= 2; size -= 1) {
+    for (let index = 0; index <= text.length - size; index += 1) {
+      tokens.add(text.slice(index, index + size));
+    }
+  }
+  return [...tokens].filter((token) => token.length >= 2);
 }
 
 function similarity(a, b) {
