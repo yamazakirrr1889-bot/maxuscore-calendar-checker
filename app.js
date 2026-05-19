@@ -49,6 +49,9 @@ const elements = {
   resultList: document.querySelector("#resultList"),
   emptyState: document.querySelector("#emptyState"),
   resultTemplate: document.querySelector("#resultTemplate"),
+  maxuscorePreview: document.querySelector("#maxuscorePreview"),
+  calendarPreview: document.querySelector("#calendarPreview"),
+  calendarPreviewStatus: document.querySelector("#calendarPreviewStatus"),
   maxuscoreCount: document.querySelector("#maxuscoreCount"),
   calendarCount: document.querySelector("#calendarCount"),
   issueCount: document.querySelector("#issueCount"),
@@ -140,6 +143,7 @@ document.querySelectorAll(".tab-button").forEach((button) => {
 });
 
 renderSummary();
+renderDataPreview();
 renderResults();
 
 function runCheck() {
@@ -329,12 +333,13 @@ function normalizeCalendarRows(rows, sourceName = "") {
       const endDate = parseDateTime(date, end) || addMinutes(startDate, 60);
       if (!title || !startDate) return null;
       return {
-        id: `calendar-${index}`,
-        title,
-        member,
-        start: startDate,
-        end: endDate,
-      };
+      id: `calendar-${index}`,
+      title,
+      member,
+      source: sourceName,
+      start: startDate,
+      end: endDate,
+    };
     })
     .filter(Boolean);
 }
@@ -410,6 +415,7 @@ function parseIcs(text, sourceName = "") {
       id: `ics-${index}`,
       title: summary,
       member: calendarName || organizer.replace(/^mailto:/i, ""),
+      source: sourceName,
       start,
       end,
     });
@@ -575,6 +581,47 @@ function updateDataStatus() {
   ];
   elements.dataStatus.textContent = parts.join(" / ");
   renderSummary();
+  renderDataPreview();
+}
+
+function renderDataPreview() {
+  renderPreviewList(elements.maxuscorePreview, state.maxuscore.slice(0, 3), (item) => ({
+    title: item.customer,
+    detail: `${formatDateTimeRange(item.start, item.end)} / ${displayMemberName(item.member) || "担当者不明"}`,
+  }));
+
+  renderPreviewList(elements.calendarPreview, state.calendar.slice(0, 5), (item) => ({
+    title: item.title || "タイトルなし",
+    detail: `${formatDateTimeRange(item.start, item.end)} / ${displayMemberName(item.member) || "担当者不明"} / ${item.source || "取得元不明"}`,
+  }));
+
+  const busyCount = state.calendar.filter((item) => /予定あり|busy/i.test(item.title || "")).length;
+  if (!state.calendar.length) {
+    elements.calendarPreviewStatus.textContent = "カレンダー0件";
+  } else if (busyCount === state.calendar.length) {
+    elements.calendarPreviewStatus.textContent = "予定名が非公開の可能性";
+  } else {
+    elements.calendarPreviewStatus.textContent = `カレンダー${state.calendar.length}件`;
+  }
+}
+
+function renderPreviewList(container, items, formatter) {
+  container.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "preview-row";
+    empty.innerHTML = "<strong>未読み込み</strong><span>ファイルを選択するとここに表示されます</span>";
+    container.append(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const formatted = formatter(item);
+    const row = document.createElement("div");
+    row.className = "preview-row";
+    row.innerHTML = `<strong>${escapeHtml(formatted.title)}</strong><span>${escapeHtml(formatted.detail)}</span>`;
+    container.append(row);
+  });
 }
 
 function setLoaded(input) {
