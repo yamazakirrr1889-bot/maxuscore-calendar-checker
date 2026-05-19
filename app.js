@@ -29,7 +29,7 @@ const headerAliases = {
   date: ["日付", "予約日", "アポ日", "開始日", "date", "start date"],
   start: ["開始時刻", "開始時間", "開始", "start", "start time"],
   end: ["終了時刻", "終了時間", "終了", "end", "end time"],
-  member: ["査定担当者", "予約担当者", "案件担当者", "受付担当者", "訪問担当者", "出張担当者", "作業担当者", "契約担当者", "営業担当者", "営業担当", "担当者", "スタッフ", "メンバー", "member", "staff", "owner"],
+  member: ["査定担当者", "査定担当", "予約担当者", "予約担当", "案件担当者", "案件担当", "受付担当者", "受付担当", "訪問担当者", "訪問担当", "出張担当者", "出張担当", "作業担当者", "作業担当", "契約担当者", "契約担当", "営業担当者", "営業担当", "担当者", "担当", "スタッフ", "メンバー", "member", "staff", "owner"],
   status: ["ステータス", "状態", "status"],
   title: ["タイトル", "件名", "予定", "summary", "subject", "title"],
 };
@@ -191,12 +191,12 @@ function scoreCandidate(appointment, event, toleranceMinutes) {
   const timeDiff = Math.abs(appointment.start.getTime() - event.start.getTime()) / 60000;
   const timeClose = timeDiff <= toleranceMinutes;
   const sameDay = toDateKey(appointment.start) === toDateKey(event.start);
-  const memberMatch = normalizeText(resolveMember(appointment.member)) === normalizeText(event.member);
+  const memberMatch = isMemberMatch(appointment.member, event);
   const titleMatch = isTitleMatch(appointment.customer, event.title);
   const titleMatchRequired = elements.titleMatchSelect.value !== "off";
-  const relevant = timeClose || sameDay || titleMatch;
-  const matched = timeClose && (memberMatch || titleMatch || !titleMatchRequired);
-  const total = (timeClose ? 50 : sameDay ? 18 : 0) + (memberMatch ? 25 : 0) + (titleMatch ? 25 : 0);
+  const relevant = timeClose || sameDay || memberMatch || titleMatch;
+  const matched = timeClose && (titleMatch || !titleMatchRequired) && (memberMatch || !appointment.member);
+  const total = (timeClose ? 50 : sameDay ? 18 : 0) + (memberMatch ? 30 : 0) + (titleMatch ? 30 : 0);
 
   return {
     total,
@@ -213,10 +213,11 @@ function scoreCandidate(appointment, event, toleranceMinutes) {
 function isTitleMatch(customer, title) {
   if (elements.titleMatchSelect.value === "off") return true;
   if (!customer || !title) return false;
-  if (elements.titleMatchSelect.value === "loose") {
-    return normalizeText(title).includes(normalizeText(customer));
-  }
-  return title.toLowerCase().includes(customer.toLowerCase());
+  const customerKey = normalizeNameForMatch(customer);
+  const titleKey = normalizeNameForMatch(title);
+  if (!customerKey || !titleKey) return false;
+  if (titleKey.includes(customerKey) || customerKey.includes(titleKey)) return true;
+  return similarity(customerKey, titleKey) >= 0.72;
 }
 
 function createResult(type, maxuscore, calendar, note) {
@@ -224,7 +225,7 @@ function createResult(type, maxuscore, calendar, note) {
     id: crypto.randomUUID(),
     type,
     customer: maxuscore?.customer || extractCustomerFromTitle(calendar?.title || "") || "不明",
-    member: maxuscore?.member || calendar?.member || "不明",
+    member: displayMemberName(maxuscore?.member || calendar?.member) || "不明",
     maxuscore,
     calendar,
     note,
@@ -280,7 +281,7 @@ function normalizeMaxuscoreRows(rows) {
   return rows
     .map((row, index) => {
       const customer = pick(row, "customer") || pick(row, "title");
-      const member = pick(row, "member") || pickByHeaderIncludes(row, "member");
+      const member = normalizeMemberName(pick(row, "member") || pickByHeaderIncludes(row, "member"));
       const status = pick(row, "status");
       const startDate = parseMaxuscoreStartDate(row);
       const endDate = parseMaxuscoreEndDate(row, startDate);
@@ -431,10 +432,14 @@ function getSourceName(fileName) {
 
 function parseIcsDate(value) {
   if (!value) return null;
+  const isUtc = value.endsWith("Z");
   const clean = value.replace("Z", "");
   const match = clean.match(/^(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
   if (!match) return null;
   const [, year, month, day, hour = "00", minute = "00"] = match;
+  if (isUtc) {
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)));
+  }
   return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
 }
 
@@ -500,8 +505,50 @@ function parseDateTime(dateValue, timeValue) {
   return Number.isNaN(direct.getTime()) ? null : direct;
 }
 
+function isMemberMatch(member, event) {
+  const tokens = getMemberTokens(resolveMember(member));
+  if (!tokens.length) return false;
+  const targets = [event.member, event.title].map(normalizeText);
+  return tokens.some((token) => targets.some((target) => target.includes(token)));
+}
+
 function resolveMember(member) {
   return state.members.get(normalizeText(member)) || member || "";
+}
+
+function normalizeMemberName(value) {
+  const raw = String(value || "")
+    .replace(/mailto:/i, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/[|｜/／,，、;；].*$/, "")
+    .trim();
+  if (!raw) return "";
+  const firstPart = raw.split(/[\s　]+/).find(Boolean) || raw;
+  return guessSurname(firstPart);
+}
+
+function displayMemberName(value) {
+  return normalizeMemberName(value);
+}
+
+function getMemberTokens(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  const normalizedRaw = normalizeText(raw);
+  const surname = normalizeText(normalizeMemberName(raw));
+  const tokens = [surname, normalizedRaw];
+  if (normalizedRaw.length >= 2) tokens.push(normalizedRaw.slice(0, 2));
+  if (normalizedRaw.length >= 3) tokens.push(normalizedRaw.slice(0, 3));
+  return [...new Set(tokens.filter((token) => token.length >= 2))];
+}
+
+function guessSurname(value) {
+  const compact = String(value || "").replace(/\s+/g, "");
+  const threeCharSurnames = ["入戸野", "佐々木", "長谷川", "小野寺", "久保田", "大久保", "五十嵐", "宇佐美"];
+  const matched = threeCharSurnames.find((surname) => compact.startsWith(surname));
+  if (matched) return matched;
+  if (compact.length >= 4 && /[\u3040-\u30ff\u3400-\u9fff]/.test(compact)) return compact.slice(0, 2);
+  return compact;
 }
 
 function extractCustomerFromTitle(title) {
@@ -561,6 +608,39 @@ function normalizeText(value) {
     .toLowerCase()
     .normalize("NFKC")
     .replace(/[\s　・:：\-ー_【】\[\]（）()]/g, "");
+}
+
+function normalizeNameForMatch(value) {
+  return normalizeText(
+    String(value || "")
+      .replace(/様|さま|さん|殿|氏/g, "")
+      .replace(/株式会社|有限会社|合同会社|買取|査定|予約|訪問|出張|案件|予定|カレンダー/g, "")
+  );
+}
+
+function similarity(a, b) {
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  if (!shorter || !longer) return 0;
+  let best = 0;
+  for (let index = 0; index <= longer.length - shorter.length; index += 1) {
+    const slice = longer.slice(index, index + shorter.length);
+    best = Math.max(best, 1 - levenshtein(shorter, slice) / Math.max(shorter.length, slice.length));
+  }
+  return best;
+}
+
+function levenshtein(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[a.length][b.length];
 }
 
 function escapeHtml(value) {
